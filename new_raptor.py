@@ -23,13 +23,14 @@
 """
 from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, QDate
 from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtWidgets import QAction, QMessageBox
+from qgis.PyQt.QtWidgets import QAction, QMessageBox, QTableWidgetItem
 from qgis.core import QgsProject, QgsFeature, QgsGeometry, QgsPoint
 
 # Initialize Qt resources from file resources.py
 from .resources import *
 # Import the code for the dialog
 from .new_raptor_dialog import NewRaptorDialog
+from .impact_table import DlgTable
 import os.path
 
 
@@ -201,11 +202,14 @@ class NewRaptor:
         for lyr in mc.layers():
             map_layers.append(lyr.name())
 
+        # Verificando se no QGIS há aberto os Layers necessários
         missing_layers = []  # Lista que conterá os layers que estão faltando
         if not "Raptor Nests" in map_layers:
             missing_layers.append("Raptor Nests")
         if not "Raptor Buffer" in map_layers:
             missing_layers.append("Raptor Buffer")
+        if not "Linear Buffer" in map_layers:
+            missing_layers.append("Linear Buffer")
         if missing_layers:
             msg = "The following layers are miissing from this project\n"
             for lyr in missing_layers:
@@ -224,6 +228,8 @@ class NewRaptor:
 
             lyrNests = QgsProject.instance().mapLayersByName("Raptor Nests")[0]  # Acessando o Layer "Raptor Nests"
             lyrBuffer = QgsProject.instance().mapLayersByName("Raptor Buffer")[0]  # Acessando o Layer "Raptor Buffer"
+            lyrLinear = QgsProject.instance().mapLayersByName("Linear Buffer")[0]  # Acessando o Layer "Linear Buffer"
+
             idxNestID = lyrNests.fields().indexOf(
                 "Nest_ID")  # Obtendo o índice do campo "Nest_ID" do layer "Raptor Nests"
             valNestID = lyrNests.maximumValue(
@@ -260,6 +266,34 @@ class NewRaptor:
             ftrNest.setGeometry(buffer)  # Definindo a geometria
             pr.addFeatures([ftrNest])  # Adicionando o Feature no Layer
             lyrBuffer.reload()  # Atualizar o Layer
+
+            dlgTable = DlgTable()
+            dlgTable.setWindowTitle("Impacts Table for Nest {}".format(valNestID))  # Alterando o Título da Tabela
+
+            # Procurar projetos lineares que serão impactados e adicioná-los na tabela
+            bb = buffer.boundingBox()  # Mecanismo para selecionar apenas Features dentro do retângulo de seleção
+            linears = lyrLinear.getFeatures(
+                bb)  # Acessando os Features do Layer "Linear Buffer" que estão dentro do retângulo de seleção
+            for linear in linears:
+                valID = linear.attribute("Project")  # Coletando o ID do Feature
+                valType = linear.attribute("type")  # Coletando o Type do Feature
+                valDistance = linear.geometry().distance(geom)  # Coletando a distância do Nest a geometria do linear
+                if valDistance < valBuffer:  # Verificando se o Feature Linear está dentro do Buffer do Nest
+                    # Preencher tabela com dados lineares
+                    row = dlgTable.tblImpacts.rowCount()  # Determinando o número de linhas na tabela
+                    dlgTable.tblImpacts.insertRow(row)  # Adicionando uma linha no final da Tabela
+                    dlgTable.tblImpacts.setItem(row, 0, QTableWidgetItem(str(valID)))  # Adicionando o item ID na linha
+                    dlgTable.tblImpacts.setItem(row, 1,
+                                                QTableWidgetItem(str(valType)))  # Adicionando o item Type na linha
+                    twi = QTableWidgetItem("{:4.5f}".format(valDistance))
+                    twi.setTextAlignment(QtCore.Qt.AlignRight)  # Ajustando o alinhamento
+                    dlgTable.tblImpacts.setItem(row, 2, twi)  # Adicionando o item Distance na linha
+
+                    dlgTable.tblImpacts.sortItems(2)  # Organizando a Tabela com base na distância
+
+            dlgTable.tblImpacts.sortItems(2)  # Organizando a Tabela com base na distância
+            dlgTable.show()
+            dlgTable.exec_()
 
         else:
             QMessageBox.information(self.dlg, "Message", "Should run if cancelled")
